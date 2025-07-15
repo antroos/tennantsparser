@@ -12,10 +12,32 @@ import csv
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 class FullAuctionParser:
     def __init__(self, auction_title="", auction_date=""):
+        # 🚀 ОПТИМИЗИРОВАННАЯ СЕССИЯ С ПУЛОМ СОЕДИНЕНИЙ
         self.session = requests.Session()
+        
+        # Настройка повторных попыток и пула соединений
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=0.3,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=20,  # пул из 20 соединений
+            pool_maxsize=20,
+            pool_block=False
+        )
+        
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -430,7 +452,8 @@ class FullAuctionParser:
             lot_images_dir = self.images_dir / lot_folder_name
             lot_images_dir.mkdir(exist_ok=True)
             
-            response = self.session.get(image_url, timeout=30)
+            # 🔥 ОПТИМИЗИРОВАННАЯ ЗАГРУЗКА: короткий timeout + stream
+            response = self.session.get(image_url, timeout=10, stream=True)
             response.raise_for_status()
             
             # Определяем расширение файла
@@ -446,8 +469,10 @@ class FullAuctionParser:
             
             filepath = lot_images_dir / filename
             
+            # Загружаем по частям для лучшей производительности
             with open(filepath, 'wb') as f:
-                f.write(response.content)
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
             
             print(f"🖼️ Изображение сохранено: {filepath}")
             return str(filepath)
@@ -457,44 +482,75 @@ class FullAuctionParser:
             return None
     
     def download_all_lot_images(self, lot_data):
-        """Скачивание всех изображений лота"""
+        """🚀 ПАРАЛЛЕЛЬНАЯ загрузка всех изображений лота"""
         lot_id = lot_data.get('lot_system_id', '')
         lot_number = lot_data.get('lot_number', '')
         lot_description = lot_data.get('lot_description', '')
         
-        downloaded_images = []
+        # Собираем все URL для загрузки
+        images_to_download = []
         
-        # Скачиваем основное изображение
+        # Основное изображение
         main_image_url = lot_data.get('image_url', '')
         if main_image_url:
-            main_path = self.download_image(
-                main_image_url, 
-                lot_id, 
-                lot_number, 
-                lot_description, 
-                is_main=True
-            )
-            if main_path:
-                downloaded_images.append(main_path)
+            images_to_download.append({
+                'url': main_image_url,
+                'lot_id': lot_id,
+                'lot_number': lot_number,
+                'lot_description': lot_description,
+                'is_main': True,
+                'image_index': 0
+            })
         
-        # Скачиваем дополнительные изображения
+        # Дополнительные изображения
         additional_urls = lot_data.get('additional_images_urls', '')
         if additional_urls:
             urls_list = additional_urls.split(' | ')
             for i, url in enumerate(urls_list, 1):
                 if url.strip():
-                    additional_path = self.download_image(
-                        url.strip(),
-                        lot_id,
-                        lot_number,
-                        lot_description,
-                        is_main=False,
-                        image_index=i
-                    )
-                    if additional_path:
-                        downloaded_images.append(additional_path)
+                    images_to_download.append({
+                        'url': url.strip(),
+                        'lot_id': lot_id,
+                        'lot_number': lot_number,
+                        'lot_description': lot_description,
+                        'is_main': False,
+                        'image_index': i
+                    })
         
-        print(f"📷 Скачано {len(downloaded_images)} изображений для лота #{lot_number}")
+        if not images_to_download:
+            print(f"📷 Нет изображений для лота #{lot_number}")
+            return []
+        
+        # 🚀 ПАРАЛЛЕЛЬНАЯ ЗАГРУЗКА
+        print(f"📥 Загружаем {len(images_to_download)} изображений для лота #{lot_number}...")
+        start_time = time.time()
+        downloaded_images = []
+        
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            # Запускаем все загрузки параллельно
+            future_to_image = {
+                executor.submit(
+                    self.download_image,
+                    img_data['url'],
+                    img_data['lot_id'],
+                    img_data['lot_number'],
+                    img_data['lot_description'],
+                    img_data['is_main'],
+                    img_data['image_index']
+                ): img_data for img_data in images_to_download
+            }
+            
+            # Собираем результаты по мере завершения
+            for future in as_completed(future_to_image):
+                try:
+                    result = future.result()
+                    if result:
+                        downloaded_images.append(result)
+                except Exception as e:
+                    print(f"❌ Ошибка загрузки изображения: {e}")
+        
+        download_time = time.time() - start_time
+        print(f"📷 Скачано {len(downloaded_images)}/{len(images_to_download)} изображений для лота #{lot_number} за {download_time:.1f}с")
         return downloaded_images
     
     def validate_lot_data(self, lot_data, lot_number):
