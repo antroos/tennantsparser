@@ -64,7 +64,9 @@ class FullAuctionParser:
         self.images_dir = self.working_dir / "images"
         self.images_dir.mkdir(exist_ok=True)
         
-        self.db_file = self.working_dir / "auction_data.csv"
+        # 🔥 СОЗДАЕМ ИНФОРМАТИВНОЕ ИМЯ ФАЙЛА БАЗЫ ДАННЫХ
+        db_filename = f"{clean_auction_name}_{clean_auction_date}_{parsing_time}.csv"
+        self.db_file = self.working_dir / db_filename
         self.init_database()
         
         # Статистика заполненности полей
