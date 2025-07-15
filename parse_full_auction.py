@@ -1040,21 +1040,36 @@ def main():
         auction_title = "Antiques_Interiors"
         auction_date = "2025-07-18"
     
+    # 🔥 СОЗДАЕМ ПАРСЕР С ИНФОРМАЦИЕЙ ОБ АУКЦИОНЕ
+    parser = FullAuctionParser(auction_title=auction_title, auction_date=auction_date)
+    
+    # 🔍 ПОДСЧИТЫВАЕМ КОЛИЧЕСТВО ЛОТОВ В АУКЦИОНЕ
+    print("\n📊 Подсчет лотов в аукционе...")
+    try:
+        lots = parser.get_all_auction_lots(auction_url)
+        total_lots_count = len(lots) if lots else 0
+        
+        if total_lots_count > 0:
+            print(f"✅ Всего лотов в аукционе: {total_lots_count}")
+        else:
+            print("❌ Не удалось подсчитать лоты в аукционе")
+            return
+    except Exception as e:
+        print(f"⚠️ Ошибка подсчета лотов: {e}")
+        total_lots_count = "неизвестно"
+
     # Спрашиваем пользователя о количестве лотов
     try:
-        user_input = input("\n🤔 Сколько лотов парсить? (Enter = все лоты, число = ограничить): ").strip()
+        user_input = input(f"\n🤔 Сколько лотов парсить из {total_lots_count}? (Enter = все лоты, число = ограничить): ").strip()
         max_lots = None
         if user_input and user_input.isdigit():
             max_lots = int(user_input)
-            print(f"✅ Будем парсить максимум {max_lots} лотов")
+            print(f"✅ Будем парсить максимум {max_lots} лотов из {total_lots_count}")
         else:
-            print("✅ Будем парсить ВСЕ лоты аукциона")
+            print(f"✅ Будем парсить ВСЕ {total_lots_count} лотов аукциона")
     except KeyboardInterrupt:
         print("\n❌ Отменено пользователем")
         return
-    
-    # 🔥 СОЗДАЕМ ПАРСЕР С ИНФОРМАЦИЕЙ ОБ АУКЦИОНЕ
-    parser = FullAuctionParser(auction_title=auction_title, auction_date=auction_date)
     
     # Запускаем парсинг
     success = parser.parse_auction(auction_url, max_lots=max_lots)
